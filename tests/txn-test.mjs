@@ -1,0 +1,133 @@
+import { chromium } from 'playwright-core';
+const out = new URL('./shots-txn/', import.meta.url).pathname, U = (process.env.EOS_URL || 'http://localhost:3000/index.html');
+const b = await chromium.launch({ channel: 'chrome', headless: true });
+const errs = [];
+async function mk(w, h) { const p = await (await b.newContext({ viewport: { width: w, height: h } })).newPage(); p.on('pageerror', e => errs.push(w + ' ' + e.message)); p.on('console', m => { if (m.type() === 'error' && !/404/.test(m.text())) errs.push(w + ' ' + m.text()); }); return p; }
+const page = await mk(1440, 1000);
+const shot = (n, p = page) => p.screenshot({ path: `${out}/${n}.png`, fullPage: true });
+const click = async (name, exact, p = page) => { await p.getByRole('button', { name, exact: !!exact }).first().click(); await p.waitForTimeout(200); };
+const assert = (c, m) => { if (!c) throw new Error('ASSERT ' + m); };
+const S = (fn, a) => page.evaluate(fn, a);
+const pdf = { name: 'Webb_77Rainey_executed.pdf', mimeType: 'application/pdf', buffer: Buffer.from('%PDF-1.4\n1 0 obj<<>>endobj\ntrailer<<>>\n%%EOF') };
+const onDoc = () => page.locator('.tx-doc.on');
+let step = '';
+try {
+  // ---------- A) compliance ----------
+  step = 'compliance'; await page.goto(U + '#/compliance'); await page.waitForTimeout(1200); await shot('01-compliance');
+  const t2 = await S(() => S.d.threads.find(t => t.id === 'T2').unread);
+  await onDoc().getByRole('button', { name: 'Request initials from the Brooks' }).click(); await page.waitForTimeout(1700);
+  assert(await S(() => S.d.threads.find(t => t.id === 'T2').unread) > t2, 'Brooks thread bumped');
+  await onDoc().getByRole('button', { name: 'Ask title to correct to Nov 6' }).click(); await page.waitForTimeout(1700);
+  await onDoc().locator('.tx-f').nth(1).click(); await page.waitForTimeout(150); await shot('02-compliance-source');
+  for (let i = 0; i < 3; i++) { await onDoc().getByRole('button', { name: 'Approve' }).click(); await page.waitForTimeout(200); }
+  await onDoc().locator('input[type=file]').setInputFiles(pdf); await page.waitForTimeout(250);
+  await onDoc().getByRole('button', { name: 'Approve' }).click(); await page.waitForTimeout(200);
+  assert(await S(() => S.d.tx.rev.D1.docs.every(d => d.st === 'Accepted')), 'all D1 docs accepted');
+  assert(await page.getByRole('button', { name: 'Mark file compliant' }).isDisabled(), 'gate blocked by CDA');
+  await click('View', true); await shot('03-compliance-cda-blocker'); await click('Fix in the CDA builder →');
+  assert(await page.evaluate(() => location.hash) === '#/commissions/cda', 'went to CDA');
+  step = 'cda'; await shot('04-cda-blocked');
+  assert(await page.getByRole('button', { name: 'Send to title for signature' }).isDisabled(), 'send blocked');
+  await click('Cap at 2.5%'); assert(await S(() => S.d.tx.cda.D1.buyer === 0 && S.d.tx.cda.D1.seller === 2.5), 'capped');
+  await click('Open review'); await click('Mark file compliant');
+  assert(await S(() => S.d.tx.rev.D1.status === 'Compliant'), 'D1 compliant');
+  step = 'reject'; await page.goto(U + '#/compliance/D3'); await page.waitForTimeout(300);
+  await onDoc().getByRole('button', { name: 'Reject with note' }).click(); await page.locator('.tx-doc.on textarea').fill('Attach the EMD receipt from trust, please.'); await click(/^Send back to/);
+  assert(await S(() => S.d.tx.rev.D3.status === 'Changes requested'), 'D3 rejected'); await shot('05-compliance-rejected');
+  step = 'intake'; await click('New deal from contract'); await shot('06-intake-pick');
+  await page.locator('.tx-drop input[type=file]').setInputFiles(pdf); await page.waitForTimeout(400); await shot('07-intake-reading'); await page.waitForTimeout(1300);
+  await page.locator('.tx-if', { hasText: 'Financing deadline' }).locator('input').fill('Oct 31'); await page.waitForTimeout(150);
+  await page.locator('.tx-if', { hasText: 'Closing date' }).click(); await shot('08-intake-review');
+  const nDeals = await S(() => S.d.deals.length);
+  await click('Create deal', true);
+  const nd = await S(() => S.d.deals[S.d.deals.length - 1]);
+  assert(nd && nd.listing === 'L3' && nd.person === 'P3' && nd.dates[2][1] === 'Oct 31' && (await S(() => S.d.deals.length)) === nDeals + 1, 'deal created');
+  assert(await S((id) => S.d.tx.emd.some(e => e.deal === id) && S.d.tx.disb.some(r => r.deal === id), nd.id), 'deal wired into trust & disb');
+  await page.waitForTimeout(300); await shot('09-compliance-new-deal');
+  await page.goto(U + '#/deal/' + nd.id); await page.waitForTimeout(300); await shot('10-new-deal-file');
+  await page.goto(U + '#/pipeline'); await page.waitForTimeout(250);
+  // ---------- B) commissions ----------
+  step = 'cda-send'; await page.goto(U + '#/commissions/cda'); await page.waitForTimeout(300);
+  await page.locator('.tx-cda select').selectOption('D1'); await page.waitForTimeout(150);
+  await click('Send to title for signature'); await page.waitForTimeout(1700);
+  assert(await S(() => S.d.tx.cda.D1.status === 'Signed'), 'CDA signed'); await shot('11-cda-signed');
+  step = 'disb'; await page.goto(U + '#/commissions/disb'); await page.waitForTimeout(300);
+  assert(await S(() => S.d.tx.disb.find(r => r.deal === 'D1').status === 'Ready'), 'D1 ready');
+  const selectAll = async () => { for (const cb of await page.locator('.tx-dt tbody input[type=checkbox]:not([disabled])').all()) await cb.check(); await page.waitForTimeout(150); };
+  await selectAll(); await shot('12-disb-selected'); await click(/^Approve/);
+  assert(await S(() => S.d.tx.disb.filter(r => r.status === 'Approved').length === 4 && S.cda && S.cda.D1 === 1), '4 approved + BackOffice synced');
+  await selectAll(); await click(/^Confirm funds in/);
+  const stubs0 = await S(() => S.d.tx.stubs.length);
+  await selectAll(); await click(/^Pay agents/); await click('Confirm payout', true);
+  assert(await S(() => S.d.tx.disb.filter(r => r.status === 'Processed').length === 5), 'all processed');
+  assert(await S(() => S.d.tx.plans.jordan.paid === 20000), 'jordan capped');
+  assert(await S(() => S.d.tx.stubs.length) >= stubs0 + 4, 'stubs written');
+  await page.locator('.tx-dt tbody tr', { hasText: '515 Ridgeview' }).click(); await page.waitForTimeout(150); await shot('13-disb-processed');
+  await page.locator('.tx-dt tbody tr', { hasText: '48 Pemberton' }).getByRole('button', { name: 'Revert' }).click(); await page.waitForTimeout(150); await page.locator('.tx-dt tbody tr', { hasText: '48 Pemberton' }).getByRole('button', { name: 'Recall' }).click(); await page.waitForTimeout(150);
+  assert(await S(() => S.d.tx.disb.find(r => r.id === 'H2').status === 'Paid'), 'reverted');
+  step = 'plans'; await page.goto(U + '#/commissions/plans'); await page.waitForTimeout(300);
+  await page.locator('.tx-plan', { hasText: 'Priya Shah' }).locator('select').selectOption('Flat 85/15 · $16k cap'); await page.waitForTimeout(150);
+  await page.getByRole('switch', { name: 'Transaction coordinator' }).click(); await page.locator('.tx-plan', { hasText: 'Sam Carter' }).locator('.tx-carry input').fill('1500'); await page.waitForTimeout(150);
+  assert(await S(() => S.d.tx.plans.priya.split === 85 && S.d.tx.fees.find(f => f.id === 'tc').on && S.d.tx.plans.sam.paid === 7600), 'plans edited'); await shot('14-plans');
+  step = 'pay'; await page.goto(U + '#/commissions/pay'); await page.waitForTimeout(300); await shot('15-paystub-jordan');
+  await page.locator('.tx-agt', { hasText: 'Sam Carter' }).click(); await page.locator('.tx-stub').nth(1).click(); await click('Send PDF'); await shot('16-paystub-sam');
+  // ---------- C) trust ----------
+  step = 'emd'; await page.goto(U + '#/trust'); await page.waitForTimeout(300);
+  const t4 = await S(() => S.d.threads.find(t => t.id === 'T4').unread);
+  await page.locator('tr', { hasText: '2210 Barton Hills' }).getByRole('button', { name: 'Request via ACH' }).click(); await page.waitForTimeout(2000);
+  assert(await S(() => S.d.tx.emd.find(e => e.id === 'E3').status === 'Received' && S.d.threads.find(t => t.id === 'T4').unread > 0), 'ACH received + inbox');
+  void t4;
+  await click('Verify wire'); await shot('17-wire-modal');
+  assert(await page.getByRole('button', { name: 'Verify & credit trust' }).isDisabled(), 'wire gated');
+  await page.locator('.modal').getByRole('button', { name: /^Call \(/ }).click(); for (const i of [1, 2, 3]) await page.locator('.modal .chk').nth(i).click();
+  await click('Verify & credit trust'); assert(await S(() => S.d.tx.emd.find(e => e.id === 'E2').status === 'Received'), 'wire verified');
+  await page.locator('tr', { hasText: '3402 Govalle' }).getByRole('button', { name: 'Receipt' }).click(); await shot('18-emd');
+  step = 'recon'; await page.goto(U + '#/trust/recon'); await page.waitForTimeout(300); await shot('19-recon-open');
+  for (const n of ['Match to statement', 'Match to statement', 'Reimburse $25', 'Reverse duplicate']) { await page.locator('.tx-ri:not(.done)').getByRole('button', { name: n }).first().click(); await page.waitForTimeout(120); }
+  await click('Sign as preparer'); await click('Broker sign-off');
+  assert(await S(() => !!S.d.tx.recon.signed.broker && S.d.tx.recon.history.length === 3), 'recon filed'); await shot('20-recon-filed');
+  step = 'export'; await page.goto(U + '#/trust/export'); await page.waitForTimeout(300); await click('Xero', true); await click(/^Export \d+ lines/);
+  assert(await S(() => S.d.tx.exported && S.d.tx.exported.to === 'xero'), 'exported'); await shot('21-export');
+  step = '1099'; await page.goto(U + '#/trust/1099'); await page.waitForTimeout(300); await click('Request W-9'); await page.waitForTimeout(1600); await click('Generate drafts'); await shot('22-1099');
+  // ---------- D) routing ----------
+  step = 'routing'; await page.goto(U + '#/routing'); await page.waitForTimeout(300);
+  const np = await S(() => S.d.people.length), nt = await S(() => S.d.threads.length);
+  await click('Simulate a lead', true);
+  assert(await S(() => S.d.people.length) === np + 1 && await S(() => S.d.threads.length) === nt + 1, 'lead created');
+  assert(await S(() => { const p = S.d.people[S.d.people.length - 1]; return p.name === 'Chris Alvarez' && p.owner === 'sam' && S.d.threads[0].unread === 1; }), 'Chris → Sam (weighted)');
+  await shot('23-routing-sim');
+  await click('Simulate a lead', true); await page.waitForTimeout(200); await shot('24-routing-claim');
+  assert(await S(() => !!S.d.tx.routing.pending), 'claim open'); await click('Priya claims');
+  assert(await S(() => S.d.people.find(p => p.name === 'Victoria Lang').owner === 'priya'), 'priya claimed');
+  await click('Simulate a lead', true); assert(await S(() => S.d.people.find(p => p.name === 'Sofia Martins').owner === 'leo'), 'rent → Leo');
+  await click('Simulate a lead', true); assert(await S(() => S.d.tx.routing.pond.length === 1), 'Ben night → pond');
+  await page.locator('.tx-pond select').first().selectOption('sam'); await page.waitForTimeout(150);
+  assert(await S(() => S.d.people.find(p => p.name === 'Ben Okafor').owner === 'sam'), 'pond claim');
+  await page.locator('.tx-watch').getByRole('button', { name: 'Log a call' }).first().click(); await page.waitForTimeout(100);
+  await click(/^Fast-forward/); assert(await S(() => S.d.tx.routing.watch.some(w => w.moved)), 'idle reassigned');
+  step = 'rules'; await page.locator('.tx-rule').nth(1).getByRole('button', { name: 'Edit' }).click();
+  await page.locator('.tx-re .tx-segs button', { hasText: 'All' }).click(); await page.locator('.tx-re').getByRole('button', { name: 'Condition', exact: true }).click();
+  await page.locator('.tx-re .tx-cond').nth(2).locator('input').fill('Hyde Park'); await page.locator('.tx-re').getByRole('button', { name: 'Remove condition' }).nth(2).click();
+  await page.locator('.tx-re .tx-agc', { hasText: 'Sam' }).locator('input').fill('4'); await page.waitForTimeout(100); await shot('25-rule-edit');
+  await click('Save rule'); assert(await S(() => S.d.tx.routing.rules[1].match === 'all' && S.d.tx.routing.rules[1].w.sam === 4), 'rule edited');
+  await click('Add rule'); await page.locator('.tx-re input').first().fill('Hyde Park buyers'); await page.locator('.tx-re select').nth(3).selectOption('claim'); await page.waitForTimeout(100);
+  await click('Delete rule'); await click('Delete', true); assert(await S(() => S.d.tx.routing.rules.length === 5), 'rule deleted');
+  await page.locator('.tx-rule.ca').getByRole('button', { name: 'Edit' }).click(); assert(await page.locator('.tx-rule.ca').getByRole('button', { name: 'Delete rule' }).count() === 0, 'catch-all undeletable'); await click('Save rule');
+  await page.getByRole('switch', { name: 'Available: Jordan Lee' }).click(); await page.locator('.tx-rule').nth(0).getByRole('button', { name: 'Move down' }).click();
+  await shot('26-routing-after');
+  const tid = await S(() => S.d.threads[0].id); await page.goto(U + '#/inbox/' + tid); await page.waitForTimeout(300); await shot('27-inbox-new-lead');
+  await page.goto(U + '#/people'); await page.waitForTimeout(200); await page.goto(U + '#/person/' + (await S(() => S.d.people[S.d.people.length - 1].id))); await page.waitForTimeout(200);
+  step = 'regress'; for (const r of ['today', 'inbox', 'people', 'pipeline', 'deal/D1', 'listings', 'listing/L3', 'rentals', 'projects', 'backoffice', 'bundle', 'site', 'portal', 'seller', 'listingops']) { await page.goto(U + '#/' + r); await page.waitForTimeout(220); }
+  step = 'mobile'; const m = await mk(400, 2600);
+  for (const r of ['compliance', 'compliance/D1', 'commissions', 'commissions/cda', 'commissions/plans', 'commissions/pay', 'trust', 'trust/recon', 'trust/export', 'trust/1099', 'routing']) {
+    await m.goto(U + '#/' + r); await m.waitForTimeout(400);
+    const sw = await m.evaluate(() => { const x = document.querySelector('.main'); return [document.documentElement.scrollWidth, x.scrollWidth, x.clientWidth]; });
+    if (sw[0] > 400 || sw[1] > sw[2]) errs.push('hscroll ' + r + ' ' + sw);
+    await shot('m-' + r.replace('/', '-'), m);
+  }
+  await m.goto(U + '#/compliance'); await m.waitForTimeout(300); await m.getByRole('button', { name: 'New deal from contract' }).click(); await m.getByRole('button', { name: /sample contract/ }).click(); await m.waitForTimeout(1600); await shot('m-intake', m);
+  await m.getByRole('button', { name: 'Create deal' }).click(); await m.waitForTimeout(300);
+  await m.goto(U + '#/routing'); await m.waitForTimeout(300); await m.getByRole('button', { name: 'Simulate a lead', exact: true }).click(); await m.waitForTimeout(300); await shot('m-routing-sim', m);
+  console.log('OK');
+} catch (e) { console.log('FAIL at ' + step + ': ' + e.message.split('\n')[0]); await shot('99-fail'); }
+console.log('ERRS', JSON.stringify(errs)); await b.close();

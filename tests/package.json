@@ -1,0 +1,11 @@
+{
+  "name": "estate-os-tests",
+  "private": true,
+  "type": "module",
+  "description": "Playwright end-to-end suites. Uses your installed Google Chrome (channel: chrome).",
+  "scripts": {
+    "test": "./run-all.sh",
+    "journey": "node journey.mjs"
+  },
+  "dependencies": { "playwright-core": "^1.63.0" }
+}

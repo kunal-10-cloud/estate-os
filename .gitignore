@@ -1,0 +1,8 @@
+node_modules
+frontend/build/
+tests/qa-out/
+tests/shots-*/
+__pycache__/
+.venv/
+.env
+.DS_Store

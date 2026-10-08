@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Estate OS</title>
+<meta name="description" content="Estate OS: one platform for brokerages, agents, property managers and developers, with buyer, seller, tenant and owner portals and a public website.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%231F4D3A'/%3E%3Ctext x='16' y='22' font-size='17' text-anchor='middle' fill='%23F5EAD6' font-family='Georgia'%3EE%3C/text%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="styles.css">
+<link rel="stylesheet" href="seller.css">
+<link rel="stylesheet" href="residents.css">
+<link rel="stylesheet" href="txn.css">
+<link rel="stylesheet" href="site.css">
+<link rel="stylesheet" href="office.css">
+</head>
+<body>
+<div id="app"></div>
+<!-- Load order matters: data → feature modules → app.js (shell + router, renders last). -->
+<script src="vendor/htm-preact-standalone.umd.js"></script>
+<script src="data.js"></script>
+<script src="portal.js"></script>
+<script src="seller.js"></script>
+<script src="residents.js"></script>
+<script src="txn.js"></script>
+<script src="site.js"></script>
+<script src="office.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
